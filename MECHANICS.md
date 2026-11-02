@@ -52,6 +52,8 @@ The terminal accepts the same command ids as the menus, toolbar and CLI. Type `h
 | Number | Value | Source |
 |---|---|---|
 | Device kinds | 3 (router, switch, host) | REBUILD.md §3 |
+| Device models | 13 (router, switch, hub, PC, laptop, server, printer, phone, access point, cloud, modem) | **estimated**; library tree |
+| Cable types | 5 (straight-through, crossover, console, serial, fiber) | **estimated**; connection library |
 | Maximum devices | 4096 | REBUILD.md §3 (fixed) |
 | Maximum cables | 8192 | REBUILD.md §3 (fixed) |
 | Maximum device/cable id | 1,000,000 | REBUILD.md §3 (fixed) |

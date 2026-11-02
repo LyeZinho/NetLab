@@ -1,7 +1,7 @@
 //! Visual tokens and the egui style. Every colour in the panels comes from here.
 
 use crate::engine::{LogKind, MessageKind};
-use crate::model::DeviceKind;
+use crate::model::{CableKind, DeviceKind};
 use crate::sim::EventKind;
 use eframe::egui::{
     self, Color32, CornerRadius, FontId, Frame, Margin, Stroke, TextStyle, Visuals,
@@ -159,6 +159,16 @@ pub fn kind_color(kind: DeviceKind) -> Color32 {
         DeviceKind::Router => T.router,
         DeviceKind::Switch => T.switch,
         DeviceKind::Host => T.host,
+    }
+}
+
+pub fn cable_color(cable: CableKind) -> Color32 {
+    match cable {
+        CableKind::StraightThrough => T.link,
+        CableKind::Crossover => Color32::from_rgb(62, 70, 76),
+        CableKind::Console => Color32::from_rgb(66, 142, 176),
+        CableKind::Serial => Color32::from_rgb(185, 64, 56),
+        CableKind::Fiber => Color32::from_rgb(214, 126, 38),
     }
 }
 

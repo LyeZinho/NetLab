@@ -93,6 +93,263 @@ impl DeviceKind {
     }
 }
 
+/// The concrete device models shown in the library tree. Every model rolls up to one of the three
+/// simulation kinds above, so adding a laptop or a server never changes how packets move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DeviceModel {
+    Router2911,
+    Router4331,
+    Switch2960,
+    Switch3560,
+    Hub,
+    Pc,
+    Laptop,
+    Server,
+    Printer,
+    IpPhone,
+    AccessPoint,
+    Cloud,
+    Modem,
+}
+
+/// The folders of the device-and-cable library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DeviceCategory {
+    Routers,
+    Switches,
+    EndDevices,
+    Wireless,
+    Wan,
+}
+
+impl DeviceCategory {
+    pub const ALL: [DeviceCategory; 5] = [
+        DeviceCategory::Routers,
+        DeviceCategory::Switches,
+        DeviceCategory::EndDevices,
+        DeviceCategory::Wireless,
+        DeviceCategory::Wan,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Routers => "Routers",
+            Self::Switches => "Switches",
+            Self::EndDevices => "End Devices",
+            Self::Wireless => "Wireless",
+            Self::Wan => "WAN Cloud",
+        }
+    }
+}
+
+impl DeviceModel {
+    pub const ALL: [DeviceModel; 13] = [
+        DeviceModel::Router2911,
+        DeviceModel::Router4331,
+        DeviceModel::Switch2960,
+        DeviceModel::Switch3560,
+        DeviceModel::Hub,
+        DeviceModel::Pc,
+        DeviceModel::Laptop,
+        DeviceModel::Server,
+        DeviceModel::Printer,
+        DeviceModel::IpPhone,
+        DeviceModel::AccessPoint,
+        DeviceModel::Cloud,
+        DeviceModel::Modem,
+    ];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "router" | "r" | "2911" | "router2911" | "r2911" => Some(Self::Router2911),
+            "4331" | "router4331" | "r4331" | "isr4331" => Some(Self::Router4331),
+            "switch" | "sw" | "s" | "2960" | "switch2960" | "sw2960" | "2960-24tt" => {
+                Some(Self::Switch2960)
+            }
+            "3560" | "switch3560" | "sw3560" | "3560-24ps" | "multilayer" => Some(Self::Switch3560),
+            "hub" => Some(Self::Hub),
+            "host" | "h" | "pc" => Some(Self::Pc),
+            "laptop" | "lap" => Some(Self::Laptop),
+            "server" | "srv" => Some(Self::Server),
+            "printer" | "prn" => Some(Self::Printer),
+            "phone" | "ipphone" | "ip-phone" => Some(Self::IpPhone),
+            "ap" | "accesspoint" | "access-point" | "wireless" => Some(Self::AccessPoint),
+            "cloud" | "wan" => Some(Self::Cloud),
+            "modem" | "dsl" => Some(Self::Modem),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Router2911 => "router2911",
+            Self::Router4331 => "router4331",
+            Self::Switch2960 => "switch2960",
+            Self::Switch3560 => "switch3560",
+            Self::Hub => "hub",
+            Self::Pc => "pc",
+            Self::Laptop => "laptop",
+            Self::Server => "server",
+            Self::Printer => "printer",
+            Self::IpPhone => "ipphone",
+            Self::AccessPoint => "accesspoint",
+            Self::Cloud => "cloud",
+            Self::Modem => "modem",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Router2911 => "2911 Router",
+            Self::Router4331 => "4331 Router",
+            Self::Switch2960 => "2960-24TT",
+            Self::Switch3560 => "3560-24PS",
+            Self::Hub => "Hub",
+            Self::Pc => "PC",
+            Self::Laptop => "Laptop",
+            Self::Server => "Server",
+            Self::Printer => "Printer",
+            Self::IpPhone => "IP Phone",
+            Self::AccessPoint => "Access Point",
+            Self::Cloud => "Cloud",
+            Self::Modem => "Modem",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Router2911 => "Routes between subnets",
+            Self::Router4331 => "Multigigabit router",
+            Self::Switch2960 => "24-port access switch",
+            Self::Switch3560 => "Layer 3 switch",
+            Self::Hub => "Repeats every frame",
+            Self::Pc => "Desktop computer",
+            Self::Laptop => "Portable computer",
+            Self::Server => "Service host",
+            Self::Printer => "Network printer",
+            Self::IpPhone => "VoIP handset",
+            Self::AccessPoint => "Wireless bridge",
+            Self::Cloud => "WAN internet cloud",
+            Self::Modem => "Broadband modem",
+        }
+    }
+
+    pub const fn kind(self) -> DeviceKind {
+        match self {
+            Self::Router2911 | Self::Router4331 => DeviceKind::Router,
+            Self::Switch2960 | Self::Switch3560 | Self::Hub => DeviceKind::Switch,
+            Self::Pc
+            | Self::Laptop
+            | Self::Server
+            | Self::Printer
+            | Self::IpPhone
+            | Self::AccessPoint
+            | Self::Cloud
+            | Self::Modem => DeviceKind::Host,
+        }
+    }
+
+    pub const fn category(self) -> DeviceCategory {
+        match self {
+            Self::Router2911 | Self::Router4331 => DeviceCategory::Routers,
+            Self::Switch2960 | Self::Switch3560 | Self::Hub => DeviceCategory::Switches,
+            Self::Pc | Self::Laptop | Self::Server | Self::Printer | Self::IpPhone => {
+                DeviceCategory::EndDevices
+            }
+            Self::AccessPoint => DeviceCategory::Wireless,
+            Self::Cloud | Self::Modem => DeviceCategory::Wan,
+        }
+    }
+
+    pub const fn name_prefix(self) -> &'static str {
+        match self {
+            Self::Router2911 | Self::Router4331 => "R",
+            Self::Switch2960 | Self::Switch3560 => "SW",
+            Self::Hub => "HUB",
+            Self::Pc => "PC",
+            Self::Laptop => "LAP",
+            Self::Server => "SRV",
+            Self::Printer => "PRN",
+            Self::IpPhone => "PHONE",
+            Self::AccessPoint => "AP",
+            Self::Cloud => "CLOUD",
+            Self::Modem => "MODEM",
+        }
+    }
+
+    pub const fn default_for(kind: DeviceKind) -> Self {
+        match kind {
+            DeviceKind::Router => Self::Router2911,
+            DeviceKind::Switch => Self::Switch2960,
+            DeviceKind::Host => Self::Pc,
+        }
+    }
+}
+
+/// The physical cable types in the connection library. The first slice simulates them identically;
+/// the type is carried in the lab file and drawn with its own colour and line style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CableKind {
+    StraightThrough,
+    Crossover,
+    Console,
+    Serial,
+    Fiber,
+}
+
+impl CableKind {
+    pub const ALL: [CableKind; 5] = [
+        CableKind::StraightThrough,
+        CableKind::Crossover,
+        CableKind::Console,
+        CableKind::Serial,
+        CableKind::Fiber,
+    ];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "straight" | "straight-through" | "straightthrough" | "copper" | "ethernet" => {
+                Some(Self::StraightThrough)
+            }
+            "crossover" | "cross" => Some(Self::Crossover),
+            "console" | "rollover" => Some(Self::Console),
+            "serial" | "dce" | "dte" => Some(Self::Serial),
+            "fiber" | "fibre" | "optical" => Some(Self::Fiber),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::StraightThrough => "straight-through",
+            Self::Crossover => "crossover",
+            Self::Console => "console",
+            Self::Serial => "serial",
+            Self::Fiber => "fiber",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::StraightThrough => "Straight-through",
+            Self::Crossover => "Crossover",
+            Self::Console => "Console",
+            Self::Serial => "Serial",
+            Self::Fiber => "Fiber",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::StraightThrough => "Switch to host",
+            Self::Crossover => "Like devices",
+            Self::Console => "Management lead",
+            Self::Serial => "Router to router",
+            Self::Fiber => "Long distance",
+        }
+    }
+}
+
 /// A device placed on the canvas. Coordinates are canvas units, not screen pixels and not world
 /// metres. The first classroom slice uses one implicit port per cable; the `topology.ports` helper
 /// is the seam where named interfaces can be introduced later without changing the file format.
@@ -100,6 +357,7 @@ impl DeviceKind {
 pub struct Node {
     pub id: NodeId,
     pub kind: DeviceKind,
+    pub model: DeviceModel,
     pub name: String,
     pub x: f32,
     pub y: f32,
@@ -112,6 +370,7 @@ pub struct Link {
     pub id: LinkId,
     pub a: NodeId,
     pub b: NodeId,
+    pub cable: CableKind,
 }
 
 /// One lab. Equality compares lab content only; the id counters are allocation state.
@@ -180,6 +439,9 @@ impl Topology {
             }
             if !node_ids.insert(node.id.0) {
                 return Err("duplicate device id");
+            }
+            if node.model.kind() != node.kind {
+                return Err("device model does not match its kind");
             }
             if !valid_text(&node.name, true) {
                 return Err("invalid device name");
@@ -278,8 +540,34 @@ impl Topology {
         x: f32,
         y: f32,
     ) -> Result<NodeId, &'static str> {
+        self.add_node_inner(kind, DeviceModel::default_for(kind), name, x, y)
+    }
+
+    /// Add a concrete device model. The model decides the simulation kind, so a laptop is still a
+    /// host to the packet engine while keeping its own name prefix and picture.
+    pub fn add_node_model(
+        &mut self,
+        model: DeviceModel,
+        name: Option<&str>,
+        x: f32,
+        y: f32,
+    ) -> Result<NodeId, &'static str> {
+        self.add_node_inner(model.kind(), model, name, x, y)
+    }
+
+    fn add_node_inner(
+        &mut self,
+        kind: DeviceKind,
+        model: DeviceModel,
+        name: Option<&str>,
+        x: f32,
+        y: f32,
+    ) -> Result<NodeId, &'static str> {
         if self.nodes.len() >= MAX_NODES {
             return Err("device limit reached");
+        }
+        if model.kind() != kind {
+            return Err("device model does not match its kind");
         }
         if !valid_coord(x) || !valid_coord(y) {
             return Err("device position is out of range");
@@ -290,7 +578,7 @@ impl Topology {
         }
         let name = match name {
             Some(value) if !value.trim().is_empty() => value.trim().to_string(),
-            _ => self.suggest_name(kind),
+            _ => self.suggest_name(model.name_prefix()),
         };
         if !valid_text(&name, true) {
             return Err("device name is too long");
@@ -298,6 +586,7 @@ impl Topology {
         self.nodes.push(Node {
             id: NodeId(id),
             kind,
+            model,
             name,
             x,
             y,
@@ -308,6 +597,15 @@ impl Topology {
     }
 
     pub fn add_link(&mut self, a: NodeId, b: NodeId) -> Result<LinkId, &'static str> {
+        self.add_link_with_cable(a, b, CableKind::StraightThrough)
+    }
+
+    pub fn add_link_with_cable(
+        &mut self,
+        a: NodeId,
+        b: NodeId,
+        cable: CableKind,
+    ) -> Result<LinkId, &'static str> {
         if self.links.len() >= MAX_LINKS {
             return Err("link limit reached");
         }
@@ -328,6 +626,7 @@ impl Topology {
             id: LinkId(id),
             a,
             b,
+            cable,
         });
         self.next_link = id.saturating_add(1);
         Ok(LinkId(id))
@@ -397,8 +696,7 @@ impl Topology {
             .and_then(parse_ipv4)
     }
 
-    fn suggest_name(&self, kind: DeviceKind) -> String {
-        let prefix = kind.name_prefix();
+    fn suggest_name(&self, prefix: &str) -> String {
         let mut n = 1usize;
         loop {
             let candidate = format!("{prefix}{n}");
@@ -506,6 +804,7 @@ mod tests {
         Node {
             id: NodeId(id),
             kind,
+            model: DeviceModel::default_for(kind),
             name: name.to_string(),
             x: 10.0,
             y: 10.0,
@@ -519,6 +818,43 @@ mod tests {
         assert_eq!(DeviceKind::parse("switch"), Some(DeviceKind::Switch));
         assert_eq!(DeviceKind::parse("pc"), Some(DeviceKind::Host));
         assert_eq!(DeviceKind::parse("firewall"), None);
+    }
+
+    #[test]
+    fn device_models_keep_their_base_kind_and_prefix() {
+        assert!(DeviceModel::ALL.len() >= 8);
+        assert_eq!(DeviceModel::Router2911.kind(), DeviceKind::Router);
+        assert_eq!(DeviceModel::Switch2960.kind(), DeviceKind::Switch);
+        assert_eq!(DeviceModel::Laptop.kind(), DeviceKind::Host);
+        assert_eq!(DeviceModel::Server.kind(), DeviceKind::Host);
+        assert_eq!(DeviceModel::parse("laptop"), Some(DeviceModel::Laptop));
+        assert_eq!(DeviceModel::parse("2960"), Some(DeviceModel::Switch2960));
+        assert_eq!(DeviceModel::Laptop.name_prefix(), "LAP");
+    }
+
+    #[test]
+    fn add_node_model_uses_the_model_name_and_kind() {
+        let mut topo = Topology::new("Lab");
+        let id = topo.add_node_model(DeviceModel::Laptop, None, 4.0, 5.0);
+        assert_eq!(id, Ok(NodeId(0)));
+        let node = topo.node(NodeId(0));
+        assert_eq!(node.map(|node| node.model), Some(DeviceModel::Laptop));
+        assert_eq!(node.map(|node| node.kind), Some(DeviceKind::Host));
+        assert_eq!(node.map(|node| node.name.as_str()), Some("LAP1"));
+    }
+
+    #[test]
+    fn links_remember_their_cable_type() {
+        let mut topo = Topology::new("Lab");
+        let a = topo.add_node(DeviceKind::Host, None, 0.0, 0.0);
+        let b = topo.add_node(DeviceKind::Host, None, 1.0, 1.0);
+        let (a, b) = (a.unwrap_or_default(), b.unwrap_or_default());
+        let link = topo.add_link_with_cable(a, b, CableKind::Crossover);
+        assert_eq!(link, Ok(LinkId(0)));
+        assert_eq!(
+            topo.links.first().map(|link| link.cable),
+            Some(CableKind::Crossover)
+        );
     }
 
     #[test]
@@ -551,11 +887,13 @@ mod tests {
                 id: LinkId(4),
                 a: NodeId(0),
                 b: NodeId(1),
+                cable: CableKind::StraightThrough,
             },
             Link {
                 id: LinkId(4),
                 a: NodeId(1),
                 b: NodeId(0),
+                cable: CableKind::StraightThrough,
             },
         ];
         assert!(Topology::from_parts("Lab".into(), nodes, links).is_err());
@@ -568,12 +906,14 @@ mod tests {
             id: LinkId(0),
             a: NodeId(0),
             b: NodeId(0),
+            cable: CableKind::StraightThrough,
         }];
         assert!(Topology::from_parts("Lab".into(), nodes.clone(), self_link).is_err());
         let dangling = vec![Link {
             id: LinkId(0),
             a: NodeId(0),
             b: NodeId(9),
+            cable: CableKind::StraightThrough,
         }];
         assert!(Topology::from_parts("Lab".into(), nodes, dangling).is_err());
     }

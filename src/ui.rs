@@ -4,7 +4,9 @@
 //! colours come from [`theme`]; all icons are drawn in code.
 
 use crate::engine::{Error, Session};
-use crate::model::{DeviceKind, LinkId, NodeId, Topology, mac_for};
+use crate::model::{
+    CableKind, DeviceCategory, DeviceKind, DeviceModel, LinkId, NodeId, Topology, mac_for,
+};
 use crate::theme::{self, RADIUS, T};
 use eframe::egui::{
     self, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Layout, Margin,
@@ -99,6 +101,8 @@ impl Default for Camera {
 pub struct App {
     pub session: Session,
     tool: Tool,
+    cable: CableKind,
+    library_open: [bool; 6],
     link_start: Option<NodeId>,
     camera: Camera,
     drag_node: Option<(NodeId, (f32, f32), Pos2)>,
@@ -138,6 +142,8 @@ impl App {
         Self {
             session,
             tool: Tool::Select,
+            cable: CableKind::StraightThrough,
+            library_open: [true, true, true, false, false, true],
             link_start: None,
             camera: Camera::default(),
             drag_node: None,
@@ -586,18 +592,33 @@ impl App {
             }
         });
         ui.menu_button("Draw", |ui| {
-            if ui.button("Router").clicked() {
-                let _ = self.run("adddevice", json!({ "kind": "router" }));
-                ui.close();
+            for category in DeviceCategory::ALL {
+                ui.menu_button(category.label(), |ui| {
+                    for model in DeviceModel::ALL
+                        .into_iter()
+                        .filter(|model| model.category() == category)
+                    {
+                        if ui.button(model.label()).clicked() {
+                            self.add_from_palette(model);
+                            ui.close();
+                        }
+                    }
+                });
             }
-            if ui.button("Switch").clicked() {
-                let _ = self.run("adddevice", json!({ "kind": "switch" }));
-                ui.close();
-            }
-            if ui.button("Host").clicked() {
-                let _ = self.run("adddevice", json!({ "kind": "host" }));
-                ui.close();
-            }
+            ui.separator();
+            ui.menu_button("Connections", |ui| {
+                for cable in CableKind::ALL {
+                    if ui
+                        .button(format!("{} — {}", cable.label(), cable.description()))
+                        .clicked()
+                    {
+                        self.tool = Tool::Cable;
+                        self.cable = cable;
+                        self.link_start = None;
+                        ui.close();
+                    }
+                }
+            });
             ui.separator();
             if ui.button("Cable tool   C").clicked() {
                 self.tool = Tool::Cable;
@@ -753,10 +774,42 @@ impl App {
                     .id_salt("nc_left_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                section(ui, "DEVICES", "click to place");
-                for kind in DeviceKind::ALL {
-                    if palette_card(ui, kind).clicked() {
-                        self.add_from_palette(kind);
+                section(ui, "DEVICE & CABLE LIBRARY", "tree folder");
+                for (index, category) in DeviceCategory::ALL.into_iter().enumerate() {
+                    let models: Vec<DeviceModel> = DeviceModel::ALL
+                        .into_iter()
+                        .filter(|model| model.category() == category)
+                        .collect();
+                    if library_group(
+                        ui,
+                        category.label(),
+                        models.len(),
+                        &mut self.library_open[index],
+                    ) {
+                        for model in models {
+                            if library_device(ui, model).clicked() {
+                                self.add_from_palette(model);
+                            }
+                        }
+                    }
+                }
+                if library_group(
+                    ui,
+                    "Connections",
+                    CableKind::ALL.len(),
+                    &mut self.library_open[5],
+                ) {
+                    for cable in CableKind::ALL {
+                        let active = self.tool == Tool::Cable && self.cable == cable;
+                        if library_cable(ui, cable, active).clicked() {
+                            self.tool = Tool::Cable;
+                            self.cable = cable;
+                            self.link_start = None;
+                            self.show_toast(
+                                format!("{} cable — click the first device", cable.label()),
+                                crate::engine::MessageKind::Info,
+                            );
+                        }
                     }
                 }
                 ui.add_space(8.0);
@@ -776,6 +829,14 @@ impl App {
                         }
                     }
                 });
+                if self.tool == Tool::Cable {
+                    ui.label(
+                        RichText::new(format!("cable: {}", self.cable.label()))
+                            .monospace()
+                            .size(9.5)
+                            .color(T.accent),
+                    );
+                }
                 ui.add_space(8.0);
                 section(ui, "LABS", "one-click layouts");
                 if lab_button(
@@ -812,7 +873,7 @@ impl App {
             });
     }
 
-    fn add_from_palette(&mut self, kind: DeviceKind) {
+    fn add_from_palette(&mut self, model: DeviceModel) {
         let world = self.screen_to_canvas(self.canvas_rect.center());
         let count = self.session.topology.nodes.len();
         let jitter = (count % 5) as f32 * 24.0;
@@ -820,7 +881,12 @@ impl App {
         let y = (world.y + ((count % 3) as f32 - 1.0) * 46.0).clamp(60.0, 940.0);
         let _ = self.run(
             "adddevice",
-            json!({ "kind": kind.as_str(), "x": x, "y": y }),
+            json!({
+                "kind": model.kind().as_str(),
+                "model": model.as_str(),
+                "x": x,
+                "y": y
+            }),
         );
         self.tool = Tool::Select;
         self.link_start = None;
@@ -954,7 +1020,11 @@ impl App {
                                 .strong()
                                 .color(T.text),
                         );
-                        ui.label(RichText::new("selected cable").size(10.0).color(T.muted));
+                        ui.label(
+                            RichText::new(format!("{} cable", link.cable.label()))
+                                .size(10.0)
+                                .color(T.muted),
+                        );
                     });
                 });
                 ui.add_space(4.0);
@@ -990,12 +1060,12 @@ impl App {
                         12.0,
                         color_with_alpha(color, 22),
                     );
-                    draw_device_glyph(ui.painter(), node.kind, icon_rect.center(), 15.0, color);
+                    draw_model_glyph(ui.painter(), node.model, icon_rect.center(), 15.0, color);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(RichText::new(&node.name).size(14.0).strong().color(T.text));
                         ui.label(
-                            RichText::new(format!("{} · id {}", node.kind.label(), node.id.0))
+                            RichText::new(format!("{} · id {}", node.model.label(), node.id.0))
                                 .size(10.0)
                                 .color(color),
                         );
@@ -1510,7 +1580,7 @@ impl App {
                         &painter,
                         a_pos,
                         b_pos,
-                        link.id,
+                        link,
                         selected,
                         in_trace,
                         self.camera.zoom,
@@ -1644,7 +1714,14 @@ impl App {
                 if let Some(id) = hovered_node {
                     if let Some(first) = self.link_start {
                         if first != id {
-                            let _ = self.run("link", json!({ "a": first.0, "b": id.0 }));
+                            let _ = self.run(
+                                "link",
+                                json!({
+                                    "a": first.0,
+                                    "b": id.0,
+                                    "cable": self.cable.as_str()
+                                }),
+                            );
                             self.link_start = None;
                         }
                     } else {
@@ -1776,9 +1853,9 @@ impl App {
                 chip.center(),
                 Align2::CENTER_CENTER,
                 if self.link_start.is_some() {
-                    "CABLE — click the second device"
+                    format!("CABLE · {} — click the second device", self.cable.label())
                 } else {
-                    "CABLE — click the first device"
+                    format!("CABLE · {} — click the first device", self.cable.label())
                 },
                 FontId::proportional(10.0),
                 T.accent,
@@ -1803,7 +1880,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 format!(
                     "{} · {} · {}",
-                    node.kind.label(),
+                    node.model.label(),
                     node.ipv4.as_deref().unwrap_or("no address"),
                     self.session.topology.ports(node.id).len()
                 ),
@@ -1826,7 +1903,7 @@ impl App {
             painter.text(
                 mid + vec2(0.0, 24.0),
                 Align2::CENTER_CENTER,
-                format!("L{} · click to select", link.id.0),
+                format!("L{} · {} · click to select", link.id.0, link.cable.label()),
                 FontId::monospace(9.0),
                 T.accent,
             );
@@ -1858,7 +1935,7 @@ impl App {
             painter.text(
                 center + vec2(0.0, 18.0),
                 Align2::CENTER_CENTER,
-                "Add a device from the palette",
+                "Add a device from the library tree",
                 FontId::proportional(13.0),
                 T.text,
             );
@@ -2307,7 +2384,7 @@ fn draw_link(
     painter: &egui::Painter,
     a: Pos2,
     b: Pos2,
-    id: LinkId,
+    link: &crate::model::Link,
     selected: bool,
     in_trace: bool,
     zoom: f32,
@@ -2315,12 +2392,17 @@ fn draw_link(
     let color = if selected || in_trace {
         T.link_hot
     } else {
-        T.link
+        theme::cable_color(link.cable)
     };
     if in_trace {
         painter.line_segment([a, b], Stroke::new(6.0, color_with_alpha(T.accent, 18)));
     }
-    painter.line_segment([a, b], Stroke::new(if selected { 2.4 } else { 1.6 }, color));
+    let stroke = Stroke::new(if selected { 2.4 } else { 1.6 }, color);
+    if link.cable == CableKind::Crossover {
+        painter.extend(egui::Shape::dashed_line(&[a, b], stroke, 6.0, 4.0));
+    } else {
+        painter.line_segment([a, b], stroke);
+    }
     if zoom > 0.55 {
         let mid = a + (b - a) * 0.5;
         let chip = Rect::from_center_size(mid + vec2(0.0, -10.0), vec2(26.0, 13.0));
@@ -2334,7 +2416,7 @@ fn draw_link(
         painter.text(
             chip.center(),
             Align2::CENTER_CENTER,
-            format!("L{}", id.0),
+            format!("L{}", link.id.0),
             FontId::monospace(8.0),
             if selected { T.accent } else { T.faint },
         );
@@ -2351,11 +2433,7 @@ fn draw_node(
 ) {
     let scale = zoom.clamp(0.55, 1.25);
     let color = theme::kind_color(node.kind);
-    let size = match node.kind {
-        DeviceKind::Router => vec2(46.0, 34.0),
-        DeviceKind::Switch => vec2(48.0, 28.0),
-        DeviceKind::Host => vec2(38.0, 32.0),
-    } * scale;
+    let size = model_size(node.model) * scale;
     let body = Rect::from_center_size(center, size);
 
     if selected {
@@ -2381,9 +2459,9 @@ fn draw_node(
         Stroke::new(1.0, if hovered { T.stroke_bright } else { T.stroke }),
         StrokeKind::Inside,
     );
-    draw_device_glyph(painter, node.kind, center, 20.0 * scale, color);
+    draw_model_glyph(painter, node.model, center, 20.0 * scale, color);
 
-    if node.kind == DeviceKind::Switch {
+    if node.model.kind() == DeviceKind::Switch {
         let ports = 6;
         let spacing = (body.width() - 16.0) / (ports as f32 - 1.0);
         for index in 0..ports {
@@ -2506,6 +2584,228 @@ fn draw_device_glyph(
                     pos2(body.left() + size * 0.5, body.top() + size * 0.18),
                 ],
                 Stroke::new(1.3, color),
+            );
+        }
+    }
+}
+
+fn model_size(model: DeviceModel) -> Vec2 {
+    match model {
+        DeviceModel::Router2911 | DeviceModel::Router4331 => vec2(46.0, 34.0),
+        DeviceModel::Switch2960 | DeviceModel::Switch3560 => vec2(48.0, 28.0),
+        DeviceModel::Hub => vec2(46.0, 24.0),
+        DeviceModel::Pc | DeviceModel::Laptop => vec2(38.0, 32.0),
+        DeviceModel::Server => vec2(34.0, 40.0),
+        DeviceModel::Printer => vec2(42.0, 32.0),
+        DeviceModel::IpPhone => vec2(30.0, 38.0),
+        DeviceModel::AccessPoint => vec2(34.0, 34.0),
+        DeviceModel::Cloud => vec2(50.0, 32.0),
+        DeviceModel::Modem => vec2(42.0, 28.0),
+    }
+}
+
+fn draw_model_glyph(
+    painter: &egui::Painter,
+    model: DeviceModel,
+    center: Pos2,
+    size: f32,
+    color: Color32,
+) {
+    let stroke = Stroke::new(1.6, color);
+    let faint = Stroke::new(1.2, color_with_alpha(color, 170));
+    match model {
+        DeviceModel::Router2911 => {
+            draw_device_glyph(painter, DeviceKind::Router, center, size, color)
+        }
+        DeviceModel::Router4331 => {
+            draw_device_glyph(painter, DeviceKind::Router, center, size, color);
+            painter.line_segment(
+                [
+                    center + vec2(size * 0.36, -size * 0.36),
+                    center + vec2(size * 0.48, -size * 0.52),
+                ],
+                faint,
+            );
+            painter.line_segment(
+                [
+                    center + vec2(size * 0.16, -size * 0.36),
+                    center + vec2(size * 0.24, -size * 0.55),
+                ],
+                faint,
+            );
+        }
+        DeviceModel::Switch2960 => {
+            draw_device_glyph(painter, DeviceKind::Switch, center, size, color)
+        }
+        DeviceModel::Switch3560 => {
+            draw_device_glyph(painter, DeviceKind::Switch, center, size, color);
+            painter.line_segment(
+                [
+                    center + vec2(-size * 0.42, size * 0.02),
+                    center + vec2(size * 0.42, size * 0.02),
+                ],
+                faint,
+            );
+        }
+        DeviceModel::Hub => {
+            let body = Rect::from_center_size(center, vec2(size * 1.1, size * 0.62));
+            painter.rect_stroke(body, CornerRadius::same(4), stroke, StrokeKind::Inside);
+            for index in 0..6 {
+                let x = body.left() + 5.0 + (body.width() - 10.0) / 5.0 * index as f32;
+                painter.circle_filled(pos2(x, center.y), 1.8, color);
+            }
+        }
+        DeviceModel::Pc => draw_device_glyph(painter, DeviceKind::Host, center, size, color),
+        DeviceModel::Laptop => {
+            let screen = Rect::from_center_size(
+                center + vec2(0.0, -size * 0.12),
+                vec2(size * 0.78, size * 0.5),
+            );
+            painter.rect_stroke(screen, CornerRadius::same(3), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    pos2(center.x - size * 0.5, center.y + size * 0.3),
+                    pos2(center.x + size * 0.5, center.y + size * 0.3),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    pos2(center.x - size * 0.38, center.y + size * 0.3),
+                    pos2(center.x - size * 0.42, center.y + size * 0.42),
+                ],
+                faint,
+            );
+            painter.line_segment(
+                [
+                    pos2(center.x + size * 0.38, center.y + size * 0.3),
+                    pos2(center.x + size * 0.42, center.y + size * 0.42),
+                ],
+                faint,
+            );
+        }
+        DeviceModel::Server => {
+            let body = Rect::from_center_size(center, vec2(size * 0.62, size * 0.94));
+            painter.rect_stroke(body, CornerRadius::same(3), stroke, StrokeKind::Inside);
+            for index in 0..3 {
+                let y = body.top() + size * 0.22 + index as f32 * size * 0.22;
+                painter.line_segment(
+                    [pos2(body.left() + 4.0, y), pos2(body.right() - 4.0, y)],
+                    faint,
+                );
+            }
+            painter.circle_filled(pos2(body.right() - 5.0, body.bottom() - 5.0), 1.6, color);
+        }
+        DeviceModel::Printer => {
+            let paper = Rect::from_center_size(
+                center + vec2(0.0, -size * 0.24),
+                vec2(size * 0.62, size * 0.28),
+            );
+            painter.rect_stroke(paper, CornerRadius::same(1), faint, StrokeKind::Inside);
+            let body = Rect::from_center_size(
+                center + vec2(0.0, size * 0.08),
+                vec2(size * 0.9, size * 0.46),
+            );
+            painter.rect_stroke(body, CornerRadius::same(4), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    pos2(body.left() + 5.0, body.bottom() + size * 0.12),
+                    pos2(body.right() - 5.0, body.bottom() + size * 0.12),
+                ],
+                faint,
+            );
+            painter.circle_filled(pos2(body.right() - 5.0, body.top() + 4.0), 1.5, color);
+        }
+        DeviceModel::IpPhone => {
+            let body = Rect::from_center_size(
+                center + vec2(0.0, size * 0.06),
+                vec2(size * 0.52, size * 0.76),
+            );
+            painter.rect_stroke(body, CornerRadius::same(4), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    pos2(body.left() + 4.0, body.top() + 4.0),
+                    pos2(body.right() - 4.0, body.top() + 4.0),
+                ],
+                faint,
+            );
+            for row in 0..3 {
+                for column in 0..2 {
+                    painter.circle_filled(
+                        pos2(
+                            body.left() + 6.0 + column as f32 * 6.0,
+                            body.center().y + row as f32 * 5.0,
+                        ),
+                        1.3,
+                        color_with_alpha(color, 150),
+                    );
+                }
+            }
+        }
+        DeviceModel::AccessPoint => {
+            let dot = center + vec2(0.0, size * 0.28);
+            painter.circle_filled(dot, size * 0.09, color);
+            painter.line_segment(
+                [dot + vec2(0.0, -size * 0.12), dot + vec2(0.0, -size * 0.32)],
+                stroke,
+            );
+            for offset in [0.2f32, 0.34, 0.48] {
+                let half = size * offset;
+                painter.line_segment(
+                    [
+                        pos2(center.x - half, center.y - size * 0.08),
+                        pos2(center.x - half * 0.55, center.y - size * 0.26),
+                    ],
+                    faint,
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x + half, center.y - size * 0.08),
+                        pos2(center.x + half * 0.55, center.y - size * 0.26),
+                    ],
+                    faint,
+                );
+            }
+        }
+        DeviceModel::Cloud => {
+            painter.circle_stroke(center + vec2(-size * 0.2, 0.0), size * 0.2, stroke);
+            painter.circle_stroke(
+                center + vec2(size * 0.02, -size * 0.12),
+                size * 0.26,
+                stroke,
+            );
+            painter.circle_stroke(center + vec2(size * 0.26, size * 0.02), size * 0.18, stroke);
+            painter.line_segment(
+                [
+                    center + vec2(-size * 0.4, size * 0.2),
+                    center + vec2(size * 0.44, size * 0.2),
+                ],
+                stroke,
+            );
+        }
+        DeviceModel::Modem => {
+            let body = Rect::from_center_size(center, vec2(size * 0.92, size * 0.5));
+            painter.rect_stroke(body, CornerRadius::same(3), stroke, StrokeKind::Inside);
+            for index in 0..3 {
+                painter.circle_filled(
+                    pos2(body.left() + 5.0 + index as f32 * 5.0, body.center().y),
+                    1.5,
+                    color_with_alpha(color, 190),
+                );
+            }
+            painter.line_segment(
+                [
+                    pos2(body.right() - 8.0, body.top()),
+                    pos2(body.right() - 2.0, body.top() - size * 0.3),
+                ],
+                faint,
+            );
+            painter.line_segment(
+                [
+                    pos2(body.right() - 4.0, body.top()),
+                    pos2(body.right() + 2.0, body.top() - size * 0.3),
+                ],
+                faint,
             );
         }
     }
@@ -2795,49 +3095,165 @@ fn toolbar_button(ui: &mut Ui, icon: Icon, label: &str, primary: bool) -> egui::
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
-fn palette_card(ui: &mut Ui, kind: DeviceKind) -> egui::Response {
+/// Draw the disclosure row for one folder of the library tree. Returns true when the folder is open.
+fn library_group(ui: &mut Ui, title: &str, count: usize, open: &mut bool) -> bool {
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 46.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
     let hovered = response.hovered();
-    let color = theme::kind_color(kind);
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius::same(RADIUS),
-        if hovered { T.card_hover } else { T.card },
-    );
+    if hovered {
+        ui.painter().rect_filled(
+            rect.shrink2(vec2(0.0, 1.0)),
+            CornerRadius::same(RADIUS),
+            T.card_hover,
+        );
+    }
+    let color = if hovered { T.accent } else { T.muted };
+    let arrow = if *open {
+        vec![
+            pos2(rect.left() + 5.0, rect.center().y - 2.0),
+            pos2(rect.left() + 11.0, rect.center().y - 2.0),
+            pos2(rect.left() + 8.0, rect.center().y + 3.0),
+        ]
+    } else {
+        vec![
+            pos2(rect.left() + 6.0, rect.center().y - 4.0),
+            pos2(rect.left() + 6.0, rect.center().y + 4.0),
+            pos2(rect.left() + 11.0, rect.center().y),
+        ]
+    };
+    ui.painter()
+        .add(egui::Shape::convex_polygon(arrow, color, Stroke::NONE));
+    let folder = Rect::from_center_size(pos2(rect.left() + 21.0, rect.center().y), vec2(12.0, 9.0));
     ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(RADIUS),
-        Stroke::new(1.0, if hovered { T.stroke_bright } else { T.stroke }),
+        folder,
+        CornerRadius::same(1),
+        Stroke::new(1.2, color),
         StrokeKind::Inside,
     );
-    let icon_center = pos2(rect.left() + 21.0, rect.center().y);
-    draw_icon(
+    ui.painter().line_segment(
+        [
+            folder.left_top() + vec2(0.0, -2.0),
+            folder.left_top() + vec2(5.0, -2.0),
+        ],
+        Stroke::new(1.2, color),
+    );
+    ui.painter().text(
+        pos2(rect.left() + 31.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(10.5),
+        if *open { T.text } else { T.muted },
+    );
+    ui.painter().text(
+        pos2(rect.right() - 3.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        count.to_string(),
+        FontId::monospace(8.5),
+        T.faint,
+    );
+    if response.clicked() {
+        *open = !*open;
+    }
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+    let _ = response;
+    *open
+}
+
+fn library_device(ui: &mut Ui, model: DeviceModel) -> egui::Response {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 26.0), Sense::click());
+    let hovered = response.hovered();
+    let color = theme::kind_color(model.kind());
+    if hovered {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(RADIUS), T.card_hover);
+    }
+    draw_model_glyph(
         ui.painter(),
-        match kind {
-            DeviceKind::Router => Icon::Router,
-            DeviceKind::Switch => Icon::Switch,
-            DeviceKind::Host => Icon::Host,
-        },
-        icon_center,
-        19.0,
+        model,
+        pos2(rect.left() + 28.0, rect.center().y),
+        15.0,
         color,
     );
     ui.painter().text(
-        pos2(rect.left() + 38.0, rect.center().y - 7.0),
+        pos2(rect.left() + 43.0, rect.center().y - 4.5),
         Align2::LEFT_CENTER,
-        kind.label(),
-        FontId::proportional(12.0),
+        model.label(),
+        FontId::proportional(10.3),
         T.text,
     );
     ui.painter().text(
-        pos2(rect.left() + 38.0, rect.center().y + 7.0),
+        pos2(rect.left() + 43.0, rect.center().y + 6.5),
         Align2::LEFT_CENTER,
-        kind.description(),
-        FontId::proportional(8.8),
+        model.description(),
+        FontId::proportional(8.0),
         T.faint,
     );
-    response.on_hover_cursor(CursorIcon::PointingHand)
+    ui.painter().text(
+        pos2(rect.right() - 4.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        "+",
+        FontId::monospace(11.0),
+        if hovered { T.accent } else { T.faint },
+    );
+    response
+        .on_hover_text(format!("Place {}", model.label()))
+        .on_hover_cursor(CursorIcon::PointingHand)
+}
+
+fn library_cable(ui: &mut Ui, cable: CableKind, active: bool) -> egui::Response {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 24.0), Sense::click());
+    let hovered = response.hovered();
+    if active {
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(RADIUS),
+            color_with_alpha(T.accent_soft, 230),
+        );
+    } else if hovered {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(RADIUS), T.card_hover);
+    }
+    let color = theme::cable_color(cable);
+    let y = rect.center().y;
+    let start = pos2(rect.left() + 15.0, y);
+    let end = pos2(rect.left() + 39.0, y);
+    let stroke = Stroke::new(2.0, if active { T.accent } else { color });
+    if cable == CableKind::Crossover {
+        ui.painter()
+            .extend(egui::Shape::dashed_line(&[start, end], stroke, 4.0, 3.0));
+    } else {
+        ui.painter().line_segment([start, end], stroke);
+    }
+    ui.painter().circle_filled(start, 2.0, stroke.color);
+    ui.painter().circle_filled(end, 2.0, stroke.color);
+    ui.painter().text(
+        pos2(rect.left() + 46.0, y - 4.5),
+        Align2::LEFT_CENTER,
+        cable.label(),
+        FontId::proportional(10.2),
+        if active { T.accent } else { T.text },
+    );
+    ui.painter().text(
+        pos2(rect.left() + 46.0, y + 6.5),
+        Align2::LEFT_CENTER,
+        cable.description(),
+        FontId::proportional(8.0),
+        T.faint,
+    );
+    if active {
+        ui.painter().text(
+            pos2(rect.right() - 4.0, y),
+            Align2::RIGHT_CENTER,
+            "ON",
+            FontId::monospace(7.5),
+            T.accent,
+        );
+    }
+    response
+        .on_hover_text(format!("Use {} cable", cable.label().to_lowercase()))
+        .on_hover_cursor(CursorIcon::PointingHand)
 }
 
 fn tool_chip(
@@ -3115,6 +3531,16 @@ mod tests {
         assert!((distance_to_segment(pos2(5.0, 3.0), a, b) - 3.0).abs() < 0.001);
         assert!((distance_to_segment(pos2(-5.0, 0.0), a, b) - 5.0).abs() < 0.001);
         assert!((distance_to_segment(pos2(15.0, 0.0), a, b) - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn palette_adds_the_chosen_device_model() {
+        let mut app = App::headless(Session::empty());
+        app.add_from_palette(DeviceModel::Laptop);
+        let node = app.session.topology.nodes.first();
+        assert_eq!(node.map(|node| node.model), Some(DeviceModel::Laptop));
+        assert_eq!(node.map(|node| node.kind), Some(DeviceKind::Host));
+        assert_eq!(node.map(|node| node.name.as_str()), Some("LAP1"));
     }
 
     #[test]

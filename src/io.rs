@@ -56,6 +56,8 @@ struct LabNode {
     id: u64,
     #[serde(default)]
     kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     #[serde(default)]
     name: String,
     #[serde(default)]
@@ -74,6 +76,8 @@ struct LabLink {
     a: u64,
     #[serde(default)]
     b: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cable: Option<String>,
 }
 
 /// Serialise a validated lab. The result is deterministic: struct field order, two-space pretty
@@ -92,6 +96,7 @@ pub fn to_string(lab: &Topology) -> Result<String, LabError> {
             .map(|node| LabNode {
                 id: node.id.0,
                 kind: node.kind.as_str().to_string(),
+                model: Some(node.model.as_str().to_string()),
                 name: node.name.clone(),
                 x: f64::from(node.x),
                 y: f64::from(node.y),
@@ -105,6 +110,7 @@ pub fn to_string(lab: &Topology) -> Result<String, LabError> {
                 id: link.id.0,
                 a: link.a.0,
                 b: link.b.0,
+                cable: Some(link.cable.as_str().to_string()),
             })
             .collect(),
     };
@@ -134,14 +140,26 @@ pub fn from_str(text: &str) -> Result<Topology, LabError> {
             return Err(LabError::Invalid("too many devices"));
         }
         let kind = DeviceKind::parse(&wire.kind).ok_or(LabError::Invalid("unknown device kind"))?;
+        let model = match wire.model.as_deref() {
+            Some(text) => {
+                let model = crate::model::DeviceModel::parse(text)
+                    .ok_or(LabError::Invalid("unknown device model"))?;
+                if model.kind() != kind {
+                    return Err(LabError::Invalid("device model does not match its kind"));
+                }
+                model
+            }
+            None => crate::model::DeviceModel::default_for(kind),
+        };
         let name = if wire.name.trim().is_empty() {
-            format!("{}{}", kind.name_prefix(), wire.id)
+            format!("{}{}", model.name_prefix(), wire.id)
         } else {
             wire.name
         };
         nodes.push(Node {
             id: NodeId(wire.id),
             kind,
+            model,
             name,
             x: wire.x as f32,
             y: wire.y as f32,
@@ -154,10 +172,16 @@ pub fn from_str(text: &str) -> Result<Topology, LabError> {
         if links.len() >= MAX_LINKS {
             return Err(LabError::Invalid("too many links"));
         }
+        let cable = match wire.cable.as_deref() {
+            Some(text) => crate::model::CableKind::parse(text)
+                .ok_or(LabError::Invalid("unknown cable type"))?,
+            None => crate::model::CableKind::StraightThrough,
+        };
         links.push(Link {
             id: LinkId(wire.id),
             a: NodeId(wire.a),
             b: NodeId(wire.b),
+            cable,
         });
     }
 
@@ -267,6 +291,56 @@ mod tests {
             assert!(a.starts_with("{\n  \"format\": \"networkscraft-lab\""));
             let parsed = from_str(&a);
             assert_eq!(parsed.ok(), Some(lab));
+        }
+    }
+
+    #[test]
+    fn device_models_and_cable_types_roundtrip() {
+        let mut lab = sample_lab();
+        let laptop = lab.add_node_model(
+            crate::model::DeviceModel::Laptop,
+            Some("LAP1"),
+            1200.0,
+            200.0,
+        );
+        assert!(laptop.is_ok());
+        if let Ok(laptop) = laptop {
+            assert!(
+                lab.add_link_with_cable(NodeId(1), laptop, crate::model::CableKind::Crossover,)
+                    .is_ok()
+            );
+        }
+        let text = to_string(&lab);
+        assert!(text.is_ok());
+        if let Ok(text) = text {
+            let parsed = from_str(&text);
+            assert_eq!(parsed.ok(), Some(lab));
+        }
+    }
+
+    #[test]
+    fn legacy_files_default_models_and_cables() {
+        let lab = from_str(
+            r#"{
+              "format": "networkscraft-lab",
+              "formatVersion": 1,
+              "nodes": [
+                { "id": 0, "kind": "switch", "name": "SW1", "x": 0, "y": 0 },
+                { "id": 1, "kind": "host", "name": "PC1", "x": 1, "y": 1 }
+              ],
+              "links": [ { "id": 0, "a": 0, "b": 1 } ]
+            }"#,
+        );
+        assert!(lab.is_ok());
+        if let Ok(lab) = lab {
+            assert_eq!(
+                lab.nodes.first().map(|node| node.model),
+                Some(crate::model::DeviceModel::Switch2960)
+            );
+            assert_eq!(
+                lab.links.first().map(|link| link.cable),
+                Some(crate::model::CableKind::StraightThrough)
+            );
         }
     }
 

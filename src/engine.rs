@@ -4,7 +4,7 @@
 //! the same id and JSON params. Commands never open dialogs.
 
 use crate::io;
-use crate::model::{DeviceKind, LinkId, NodeId, Topology, parse_ipv4};
+use crate::model::{CableKind, DeviceKind, DeviceModel, LinkId, NodeId, Topology, parse_ipv4};
 use crate::sim::{EventKind, PingOutcome, SimEvent, ping};
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -335,7 +335,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         menu: Some("Draw > Device"),
         shortcut: Some("A"),
         aliases: &["add"],
-        params: "{ kind: \"router\"|\"switch\"|\"host\", name?, x?, y? }",
+        params: "{ kind?: \"router\"|\"switch\"|\"host\", model?, name?, x?, y? }",
         enabled: always,
         run: cmd_adddevice,
     },
@@ -345,7 +345,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         menu: Some("Draw > Cable"),
         shortcut: Some("C"),
         aliases: &["cable", "connect"],
-        params: "{ a: number, b: number }",
+        params: "{ a: number, b: number, cable? }",
         enabled: always,
         run: cmd_link,
     },
@@ -585,11 +585,25 @@ fn cmd_campus(session: &mut Session, _params: &Value) -> Result<Value, Error> {
 }
 
 fn cmd_adddevice(session: &mut Session, params: &Value) -> Result<Value, Error> {
-    let kind = params
-        .get("kind")
-        .and_then(Value::as_str)
-        .and_then(DeviceKind::parse)
-        .ok_or_else(|| Error::msg("kind must be router, switch or host"))?;
+    let model = match params.get("model").and_then(Value::as_str) {
+        Some(text) => {
+            Some(DeviceModel::parse(text).ok_or_else(|| Error::msg("unknown device model"))?)
+        }
+        None => None,
+    };
+    let kind = match params.get("kind").and_then(Value::as_str) {
+        Some(text) => DeviceKind::parse(text)
+            .ok_or_else(|| Error::msg("kind must be router, switch or host"))?,
+        None => model.map(DeviceModel::kind).ok_or_else(|| {
+            Error::msg("adddevice needs a kind (router, switch, host) or a model")
+        })?,
+    };
+    if let Some(model) = model
+        && model.kind() != kind
+    {
+        return Err(Error::msg("device model does not match its kind"));
+    }
+    let model = model.unwrap_or(DeviceModel::default_for(kind));
     let name = params.get("name").and_then(Value::as_str);
     let count = session.topology.nodes.len();
     let default_x = 360.0 + (count % 4) as f32 * 210.0;
@@ -601,7 +615,7 @@ fn cmd_adddevice(session: &mut Session, params: &Value) -> Result<Value, Error> 
     }
     let id = session
         .topology
-        .add_node(kind, name, x, y)
+        .add_node_model(model, name, x, y)
         .map_err(Error::msg)?;
     session.selected = Some(id);
     session.selected_link = None;
@@ -618,10 +632,20 @@ fn cmd_adddevice(session: &mut Session, params: &Value) -> Result<Value, Error> 
 fn cmd_link(session: &mut Session, params: &Value) -> Result<Value, Error> {
     let a = node_id_param(params, "a")?;
     let b = node_id_param(params, "b")?;
-    let id = session.topology.add_link(a, b).map_err(Error::msg)?;
+    let cable = match params.get("cable").and_then(Value::as_str) {
+        Some(text) => CableKind::parse(text).ok_or_else(|| Error::msg("unknown cable type"))?,
+        None => CableKind::StraightThrough,
+    };
+    let id = session
+        .topology
+        .add_link_with_cable(a, b, cable)
+        .map_err(Error::msg)?;
     session.dirty = true;
-    session.set_message(MessageKind::Success, format!("Cable L{} created", id.0));
-    Ok(json!({ "linkId": id.0 }))
+    session.set_message(
+        MessageKind::Success,
+        format!("Cable L{} created ({})", id.0, cable.label()),
+    );
+    Ok(json!({ "linkId": id.0, "cable": cable.as_str() }))
 }
 
 fn cmd_select(session: &mut Session, params: &Value) -> Result<Value, Error> {
@@ -641,7 +665,7 @@ fn cmd_select(session: &mut Session, params: &Value) -> Result<Value, Error> {
     session.selected = selected;
     session.selected_link = None;
     let message = match selected.and_then(|id| session.topology.node(id)) {
-        Some(node) => format!("Selected {} ({})", node.name, node.kind.label()),
+        Some(node) => format!("Selected {} ({})", node.name, node.model.label()),
         None => "Selection cleared".to_string(),
     };
     session.set_message(MessageKind::Info, message);
@@ -1072,7 +1096,9 @@ fn params_for(spec: &CommandSpec, args: &[String]) -> Result<Value, Error> {
         | "clearlog" => Ok(json!({})),
         "adddevice" => {
             if args.is_empty() {
-                return Err(Error::msg("adddevice needs a kind: router, switch or host"));
+                return Err(Error::msg(
+                    "adddevice needs a kind or model: router, switch, host, laptop, server…",
+                ));
             }
             let kind = args[0].clone();
             let mut name: Option<String> = None;
@@ -1087,7 +1113,11 @@ fn params_for(spec: &CommandSpec, args: &[String]) -> Result<Value, Error> {
             } else if args.len() == 2 {
                 name = Some(args[1].clone());
             }
-            let mut params = json!({ "kind": kind });
+            let mut params = if DeviceKind::parse(&kind).is_some() {
+                json!({ "kind": kind })
+            } else {
+                json!({ "model": kind })
+            };
             if let Some(name) = name {
                 params["name"] = json!(name);
             }
@@ -1407,6 +1437,43 @@ mod tests {
             );
         }
         assert!(session.goal_done);
+    }
+
+    #[test]
+    fn adddevice_accepts_models_and_link_accepts_cables() {
+        let mut session = Session::empty();
+        let switch = session.execute(
+            "adddevice",
+            &json!({"kind":"switch","model":"switch3560","x":100.0,"y":100.0}),
+        );
+        let laptop = session.execute(
+            "adddevice",
+            &json!({"kind":"host","model":"laptop","x":400.0,"y":100.0}),
+        );
+        let (Ok(switch), Ok(laptop)) = (switch, laptop) else {
+            return;
+        };
+        let switch_id = switch["nodeId"].as_u64().unwrap_or(0);
+        let laptop_id = laptop["nodeId"].as_u64().unwrap_or(0);
+        assert_eq!(
+            session
+                .topology
+                .node(NodeId(laptop_id))
+                .map(|node| node.model),
+            Some(crate::model::DeviceModel::Laptop)
+        );
+        assert!(
+            session
+                .execute(
+                    "link",
+                    &json!({"a":switch_id,"b":laptop_id,"cable":"crossover"}),
+                )
+                .is_ok()
+        );
+        assert_eq!(
+            session.topology.links.first().map(|link| link.cable),
+            Some(crate::model::CableKind::Crossover)
+        );
     }
 
     #[test]

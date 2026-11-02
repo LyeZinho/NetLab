@@ -75,7 +75,10 @@ Every action is a command. The terminal, menus, toolbar and CLI resolve the same
 
 ## Layout
 
-- **Devices** (left): click to place a router, switch or host; select/cable/delete tools; built-in labs.
+- **Library** (left): one tree folder for everything — Routers, Switches, End Devices, Wireless, WAN
+  Cloud and Connections. Pick any model (2911/4331 router, 2960/3560 switch, hub, PC, laptop,
+  server, printer, IP phone, access point, cloud, modem) or cable type (straight-through,
+  crossover, console, serial, fiber); select/cable/delete tools; built-in labs.
 - **Topology** (centre): code-drawn devices, links with ids, MAC/ARP/ICMP pulse animation, zoom/pan.
 - **Terminal** (bottom left): command log and the same command line as the CLI.
 - **Packet log** (bottom right): the last operation's events, newest last, with link ids.

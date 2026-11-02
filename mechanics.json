@@ -2,6 +2,8 @@
   "version": 1,
   "values": [
     { "name": "device kinds", "group": "model", "value": 3, "unit": "kinds", "source": "REBUILD.md §3" },
+    { "name": "device models", "group": "model", "value": 13, "unit": "models", "source": "library tree in src/model.rs", "estimated": true },
+    { "name": "cable types", "group": "model", "value": 5, "unit": "types", "source": "connection library in src/model.rs", "estimated": true },
     { "name": "maximum devices", "group": "model", "value": 4096, "unit": "devices", "source": "REBUILD.md §3 fixed limit" },
     { "name": "maximum cables", "group": "model", "value": 8192, "unit": "cables", "source": "REBUILD.md §3 fixed limit" },
     { "name": "maximum id", "group": "model", "value": 1000000, "unit": "id", "source": "REBUILD.md §3 fixed limit" },
