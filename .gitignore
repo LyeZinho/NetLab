@@ -1,0 +1,9 @@
+# Build output
+/target/
+
+# Generated screenshots and self-test reports
+/shots/
+
+# Editor and OS noise
+*.tmp
+.DS_Store
